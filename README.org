@@ -1,5 +1,5 @@
-# sa
+* sa
 ssh autologin tool
 
-# install
+* install
 ./sa install
