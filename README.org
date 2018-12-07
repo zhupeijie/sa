@@ -1,2 +1,5 @@
 # sa
 ssh autologin tool
+
+# install
+./sa install

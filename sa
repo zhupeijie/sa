@@ -1,0 +1,319 @@
+#!/usr/bin/expect
+
+## global config variables
+global CONFIG_DIR
+global SSH_IDS_DIR
+set CONFIG_DIR  $::env(HOME)/.sa
+set SSH_IDS_DIR $CONFIG_DIR/ids
+
+## global color variables
+global RED_S
+global WHITE_S
+global COLOR_E
+set WHITE_S "\033\[01;37m"
+set RED_S   "\033\[01;91m"
+set COLOR_E "\033\[0m"
+
+proc generate_config {} {
+    global SSH_IDS_DIR
+    global CONFIG_DIR
+    
+    ## mkdir ~/.sa/ids
+    if {![file exists $SSH_IDS_DIR]} {
+	file mkdir $SSH_IDS_DIR
+    }    
+    
+    ## put to ~/.sa/config.tcl
+    set outfile [open "$CONFIG_DIR/config.tcl" w+]
+
+    puts $outfile "## server configs"
+    puts $outfile "## hostname    \"127.0.0.1\""
+    puts $outfile "## port        \"22\""
+    puts $outfile "## username    \"root\""
+    puts $outfile "## password    \"toor\""
+    puts $outfile "## idfile      \"ids/1234.pem\""
+    puts $outfile "## passphrase  \"\"\n"
+
+    puts $outfile "# example.me"
+    puts $outfile "set server_name example.me"
+    puts $outfile "dict set servers \$server_name hostname    \"127.0.0.1\""
+    puts $outfile "dict set servers \$server_name port        \"22\""
+    puts $outfile "dict set servers \$server_name username    \"root\""
+    puts $outfile "dict set servers \$server_name password    \"toor\""
+    puts $outfile "dict set servers \$server_name idfile      \"\""
+    puts $outfile "dict set servers \$server_name passphrase  \"\"\n\n"
+
+    puts $outfile "# example.tbj"
+    puts $outfile "set server_name example.tbj"
+    puts $outfile "dict set servers \$server_name hostname    \"127.0.0.1\""
+    puts $outfile "dict set servers \$server_name port        \"22\""
+    puts $outfile "dict set servers \$server_name username    \"root\""
+    puts $outfile "dict set servers \$server_name password    \"\""
+    puts $outfile "dict set servers \$server_name idfile      \"ids/example.pem\""
+    puts $outfile "dict set servers \$server_name passphrase  \"toor\""
+
+    close $outfile
+    
+    return 1
+}
+
+## list all servers
+proc list_s {} {
+    global RED_S
+    global WHITE_S
+    global COLOR_E
+
+    set servers [get_server_config]
+    
+    set tab "    "
+    puts "${WHITE_S}Listing entries:${COLOR_E}\n"
+
+    set i 0
+    dict for {id info} $servers {
+	dict with info {
+	    puts "${RED_S}${tab}${i}. ${id}${COLOR_E} -> ${username}@${hostname}:${port}"
+	    incr i
+	}
+    }
+
+    puts ""
+}
+
+proc login_interact {hostname port username password idfile passphrase} {
+    if {$idfile eq ""} {
+	spawn zssh $username@$hostname -p $port
+	expect "*?assword:*"
+	send -- "${password}\r"
+	send -- "\r"
+	interact
+
+	return 1
+    }
+
+    global SSH_IDS_DIR
+
+    ## has id file
+    set path "$SSH_IDS_DIR/${idfile}"
+    spawn zssh $username@$hostname -p $port -i $path
+    expect "*?\'$path\':*"
+    send -- "${passphrase}\r"
+    send -- "\r"
+    interact
+    
+    return 1
+}
+
+proc select_and_login {index} {
+    set i 0
+    set has 0
+    set servers [get_server_config]
+    
+    dict for {id info} $servers {
+	if {$i eq $index} {
+	    dict with info {
+		login_interact $hostname $port $username $password $idfile $passphrase
+	    }
+
+	    set has 1
+	    break
+	}
+	
+	incr i
+    }
+
+    if {$has == 0} {
+	puts "${RED_S}Error: No this server index!${COLOR_E}"
+    }
+    
+    return 1
+}
+
+proc install {} {
+    global CONFIG_DIR
+    global RED_S
+    global COLOR_E
+
+    set curr_dir [pwd]
+    
+    if {![file exists $CONFIG_DIR]} {
+	puts "Info: initial configures..."
+	generate_config
+	puts "Done."
+    }
+
+    ## do copy config.tcl
+    if {[file exists $curr_dir/config.tcl]} {
+	## do backup
+	if {[file exists ${CONFIG_DIR}/config.tcl]} {
+	    puts "Warning: ${CONFIG_DIR}/config.tcl is already exists, backuping it to ${CONFIG_DIR}/config.tcl.bak..."
+
+	    if {[file exists ${CONFIG_DIR}/config.tcl.bak]} {
+		file delete -force $CONFIG_DIR/config.tcl.bak
+	    }
+	    
+	    file copy -force ${CONFIG_DIR}/config.tcl ${CONFIG_DIR}/config.tcl.bak
+	    puts "Done."
+	}
+
+	## copy config to home dir
+	puts "Info: copying current config.tcl to ${CONFIG_DIR}/config.tcl..."
+	file delete -force $CONFIG_DIR/config.tcl
+	file copy -force $curr_dir/config.tcl $CONFIG_DIR/config.tcl
+	puts "Done."
+    }    
+
+    ## do copy ids
+    if {[file exists $curr_dir/ids]} {
+	## do backup
+	if {[file exists ${CONFIG_DIR}/ids]} {
+	    puts "Warning: ${CONFIG_DIR}/ids is already exists, backuping it to ${CONFIG_DIR}/ids.bak... "
+
+	    if {[file exists ${CONFIG_DIR}/ids.bak]} {
+		file delete -force $CONFIG_DIR/ids.bak
+	    }
+	    
+	    file copy -force ${CONFIG_DIR}/ids ${CONFIG_DIR}/ids.bak
+	    puts "Done."
+	}
+
+	## copy config to home dir
+	puts "Info: copying current ids directory to ${CONFIG_DIR}/ids..."
+	file delete -force $CONFIG_DIR/ids
+	file copy -force $curr_dir/ids $CONFIG_DIR/ids	
+	puts "Done."
+    }
+
+    if {![file exists $::env(HOME)/bin]} {
+	puts "Info: creating $::env(HOME)/bin directory..."
+	file mkdir $::env(HOME)/bin
+	puts "Done."
+    }
+    
+    if {[file exists $::env(HOME)/bin/sa]} {
+	puts "${RED_S}Error: ${::env(HOME)}/bin/sa already exists, you should delete it by yourself, stoped."
+	return 0
+    }
+
+    puts "Info: copying main execute file to ${::env(HOME)}/bin..."
+    file copy -force $curr_dir/sa ${::env(HOME)}/bin/sa
+    puts "Done.\n"
+
+    puts "Install Successful."
+    puts "Note. Don't forget to seting your environment: export PATH=${::env(HOME)}/bin:\$PATH"
+
+    return 1
+}
+
+proc target {file_name} {
+    global CONFIG_DIR
+
+    set curr_dir [file dirname [file normalize [info script]]]
+
+    puts "Packing..."
+    exec tar -czf $file_name -C $CONFIG_DIR config.tcl ids -C $curr_dir sa
+    puts "Done."
+
+    return 1
+}
+
+proc show_usage {} {
+    puts "Usages:"
+    puts "    --help     show help message"
+    puts "    l          list server entries, eg: sa l"
+    puts "    i          login to the index of server, eg: sa i 1"
+    puts "    target     export configs and target to a tgz file, eg: sa target /home/drons/sa.tgz"
+    puts "    install    do install\n"
+    puts "Note: Default config directory is $::env(HOME)/.sa, please configure it by yourself."
+    puts "Dependency: zssh, expect\n"
+}
+
+proc check_args {argc argv} {
+    if {$argc < 1} {
+	return 0
+    }
+
+    if {[lindex $argv 0] != "l" && [lindex $argv 0] != "i"} {
+	return 0
+    }
+
+    if {[lindex $argv 0] == "i" && $argc < 2} {
+	return 0
+    }
+
+    return 1
+}
+
+proc get_server_config {} {
+    global CONFIG_DIR
+    global RED_S
+    global COLOR_E
+    
+    ## reading config file
+    if {![file exists $CONFIG_DIR/config.tcl]} {
+	puts "${RED_S}Error: Can't find config file from ${CONFIG_DIR}, please use \[sa install\] command to install first.${COLOR_E}"
+	exit 1
+    }
+
+    source $CONFIG_DIR/config.tcl
+
+    return $servers
+}
+
+proc main {argc argv} {
+    global CONFIG_DIR
+    global SSH_IDS_DIR
+    global RED_S
+    global COLOR_E
+    
+    if {$argc < 1} {
+	list_s
+	return 1
+    }
+
+    if {[scan [lindex $argv 0] {%[0-9]} m]} {
+	select_and_login [lindex $argv 0]
+	return 1
+    }
+    
+    switch [lindex $argv 0] {
+	
+	"--help" {
+	    show_usage
+	    return 1
+	}
+
+	"target" {
+	    if {$argc < 2} {
+		show_usage
+		return 1
+	    }
+	    return [target [lindex $argv 1]]
+	}
+	
+	"install" {
+	    return [install]
+	}
+	
+	"l" {
+	    list_s
+	    return 1
+	}
+
+	"i" {
+	    if {$argc < 2} {
+		show_usage
+		return 1
+	    }
+	    select_and_login [lindex $argv 1]
+	    return 1
+	}
+
+	default {
+	    puts "Invalid arguments."
+	    show_usage
+	    return 0
+	}
+    }
+}
+
+main $argc $argv
